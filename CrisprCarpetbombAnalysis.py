@@ -2,130 +2,194 @@ import sys
 
 def main ():
     lineCount=1 
-    blatfilename= sys.argv[1]
-    gRNAfilename= sys.argv[2]
+    blatfile1= sys.argv[1]
+    blatfile2=sys.argv[2]
+    gRNAfilename= sys.argv[3]
 
-    misalignedQNames, unexpectedlyModifiedQNames=[],[]
+    matchInfo = {}
     sizeIndel= {-15:0, -14:0, -13:0, -12:0, -11:0, -10:0, -9:0, -8:0, -7:0, -6:0, -5:0, -4:0, -3:0, -2:0, -1:0, 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0, 10:0, 11:0, 12:0, 13:0, 14:0, 15:0}
-    caseOccurences = {1:0, 2:0, 3:0, 4:0, 5:0, 6:0, 7:0, 8:0, 9:0, 10:0, 11:0, 12:0, 13:0, 14:0, 15:0, 16:0, 17:0, 18:0, 19:0, 20:0, 21:0, 22:0, 23:0, 24:0, 25:0, 26:0, 27:0, 28:0, 29:0, 30:0, 31:0, 32:0, 33:0, 34:0}
+    caseDict = {}
+    pairedEndStrandMM=0 
+    pairedEndCaseMM=0 
+
     gRNAChrPos= getgRNAS(gRNAfilename)
     #print gRNAChrPos
-    with open(blatfilename, "r") as file:
-        for line in file:
+    with open(blatfile1, "r") as file1, open(blatfile2, "r") as file2:
+        for line in file1:
+            lineList=line.split()
+            readName=lineList[9]
+            matchInfo[readName]=[lineList]
+        for line in file2:
+            lineList=line.split()
+            readName=lineList[9] 
+            if(readName in matchInfo): 
+                matchInfo[readName].append(lineList)
+            #else: 
+            #    matchInfo[readName]=[lineList] Will add this feature later!
 
-            #print "line", lineCount
-            misalignedQNames, unexpectedlyModifiedQNames, sizeIndel, caseOccurences, = analyzeLine(line, gRNAChrPos, misalignedQNames, unexpectedlyModifiedQNames,  sizeIndel, caseOccurences)
-            lineCount+=1
+    for line in matchInfo:
+        #print "matchInfo[line]", matchInfo[line]
+        if (len(matchInfo[line])==2):
+            readOne= matchInfo[line][0]
+            readTwo=matchInfo[line][1]
+            case, sizeIndel, pairedEndStrandMM, pairedEndCaseMM= analyzeLine(gRNAChrPos, readOne, readTwo, sizeIndel, pairedEndStrandMM, pairedEndCaseMM)
+            caseDict= updateCaseList(case, caseDict) 
+    #print "pairedEndStrandMM", pairedEndStrandMM, "pairedEndCaseMM", pairedEndCaseMM
+    for element in caseDict:
+        print element, caseDict[element]
+    print "pairedEndCaseMM", pairedEndCaseMM
 
-    print "sizeIndel"
-    print sizeIndel
+    #print "sizeIndel"
+    #print sizeIndel
 
-    print 'caseOccurences'
-    print caseOccurences
+    #print 'caseOccurences'
+    #print caseOccurences
 
     #print 'misalignedQNames'
     #print misalignedQNames
 
-def analyzeLine(line, gRNAChrPos, misalignedQNames, unexpectedlyModifiedQNames, sizeIndel, caseOccurences):
-    lineList=line.split()
-    strand, qName, blockSize, qStart, tStart, qEnd, tEnd=lineList[8], lineList[9], map(int, lineList[18].split(",")[:-1]), map(int, lineList[19].split(",")[:-1]), map(int, lineList[20].split(",")[:-1]), [], []
-    numBlocks, numQStarts, numTStarts, numgRNAs= len(blockSize), len(qStart), len(tStart), len(gRNAChrPos)
+def analyzeLine(gRNAChrPos, readOne, readTwo, sizeIndel, pairedEndStrandMM, pairedEndCaseMM):
+    r1List=readOne
+    r2List=readTwo
+    r1Strand, r1QName, r1BlockSize, r1QStart, r1TStart, r1QEnd, r1TEnd=r1List[8], r1List[9], map(int, r1List[18].split(",")[:-1]), map(int, r1List[19].split(",")[:-1]), map(int, r1List[20].split(",")[:-1]), [], []
+    r2Strand, r2QName, r2BlockSize, r2QStart, r2TStart, r2QEnd, r2TEnd=r2List[8], r2List[9], map(int, r2List[18].split(",")[:-1]), map(int, r2List[19].split(",")[:-1]), map(int, r2List[20].split(",")[:-1]), [], []
+    r1NumBlocks, r1NumQStarts, r1NumTStarts = len(r1BlockSize), len(r1QStart), len(r1TStart)
+    r2NumBlocks, r2NumQStarts, r2NumTStarts = len(r2BlockSize), len(r2QStart), len(r2TStart) 
+    numgRNAs = len(gRNAChrPos)
+
+    caseTotal=[]
     spliceRange, indelRange= 20,15
 
-    #print "qStart", "tStart", "blockSize", "qEnd", "tEnd"
-    #print qStart, tStart, blockSize, qEnd, tEnd
+    if (r1Strand == r2Strand):
+        return caseTotal, sizeIndel, pairedEndStrandMM+1, pairedEndCaseMM
+    elif (r1Strand == "-" and r2Strand == "+"): 
+        for i in range (0, r1NumBlocks):
+            r1TEnd.append(r1TStart[i]-r1BlockSize[i])
+        for i in range(0, r2NumBlocks): 
+            r2TEnd.append(r2TStart[i]+r2BlockSize[i])  
+    elif(r1Strand == "+" and r2Strand == "-"): 
+        for i in range (0, r1NumBlocks):
+            r1TEnd.append(r1TStart[i]+r1BlockSize[i])
+            r1QEnd.append(r1QStart[i]+r1BlockSize[i])
 
-    if (numBlocks!= numQStarts and numQStarts!= numTStarts):
-        return misalignedQNames.append(qName), unexpectedlyModifiedQNames, sizeIndel, caseOccurences
-    for i in range (0, numBlocks):
-        tEnd.append(tStart[i]+blockSize[i])
-        qEnd.append(qStart[i]+blockSize[i])
-        
-    #print "blockSize"
-    #print blockSize
+        for i in range(0, r2NumBlocks): 
+            r2TEnd.append(r2TStart[i]-r2BlockSize[i])
+            r2QEnd.append(r2QStart[i]+r2BlockSize[i])
 
-    #print "tStart"
-    #print tStart
-
-
-
-    #print "gRNAChrPos"
-    #print gRNAChrPos
-
-    i=0
-    while(i<numQStarts): #Helps remove artifacts before the start of first guide RNA
-        if (tEnd[i]< gRNAChrPos[0][0]-15):
-            #print "tEnd1", tEnd
-            #print "numQStarts1", numQStarts
-
-
-            qStart, tStart, blockSize = qStart[1:], tStart[1:], blockSize[1:]
-            qEnd, tEnd= qEnd[1:], tEnd[1:]
-            numQStarts, numTStarts, numBlocks= numQStarts-1, numTStarts-1, numBlocks-1
-
-            #print "tEnd2", tEnd
-            #print "numQStarts2", numQStarts
-        else:
-            i+=1
-
-    #print "blockSize"
-    #print blockSize
-
-    if (numBlocks==1 or strand == "-"): #If there is only one block then there was no editing of genome. Also exception if read starts in the middle of the exome
-        return misalignedQNames, unexpectedlyModifiedQNames, sizeIndel, caseOccurences
             
-    else: 
-        for i in range(0, numBlocks-1):
-            nearbygRNAs= determineNearbygRNAs(tEnd[i], tStart[i+1], gRNAChrPos, numgRNAs, spliceRange)
-            if (nearbygRNAs[0] != None and nearbygRNAs[1] != None):
-                if (nearbygRNAs[0] != nearbygRNAs[1]): #gRNA1-gRNA2 del
-                    if (nearbygRNAs[1]-nearbygRNAs[0]==1): 
-                        caseOccurences[11]+=1 
-                    elif(nearbygRNAs[1]-nearbygRNAs[0]==2): 
-                        caseOccurences[12]+=1 
-                    elif(nearbygRNAs[1]-nearbygRNAs[0]==3): 
-                        caseOccurences[13]+=1
 
-                elif (qEnd[i] == qStart[i+1] and tEnd[i]==tStart[i+1]):
+    if (r1NumBlocks == r1NumQStarts and r1NumQStarts == r1NumTStarts and r2NumBlocks==r2NumQStarts and r2NumQStarts==r2NumTStarts):    
+        case1=[]
+        case2=[]
+
+        #TODO figure out way of updating cases such that it factors in reads that start near guide RNAs
+
+        case1= determineNearbygRNAs(r1TEnd, r1TStart, gRNAChrPos, numgRNAs, spliceRange, r1Strand)
+        case2= determineNearbygRNAs(r2TEnd, r2TStart, gRNAChrPos, numgRNAs, spliceRange, r2Strand)    
+        
+        if (r1Strand=="+" and r2Strand=="-"): 
+            caseTotal, pairedEndCaseMM=getCaseTotal(case1, case2, numgRNAs, pairedEndCaseMM)
+        elif(r1Strand=="-" and r2Strand=="+"): 
+            caseTotal, pairedEndCaseMM=getCaseTotal(case2, case1, numgRNAs, pairedEndCaseMM)
+
+        """if (nearbygRNAs[0] != None and nearbygRNAs[1] != None):
+
+                if (qEnd[i] == qStart[i+1] and tEnd[i]==tStart[i+1]):
                     return misalignedQNames.append(qName), unexpectedlyModifiedQNames, sizeIndel, caseOccurences
                 elif (qEnd[i] == qStart[i+1] and tEnd[i] < tStart[i+1] and (tStart[i+1]-tEnd[i])<indelRange): #deletion
                     #print "deletion"
-                    caseOccurences= findCase(nearbygRNAs[])
-                    if (nearbygRNAs[0]==0): 
-                        caseOccurences[1]+=1
-                    elif(nearbygRNAs[0]==1): 
-                        caseOccurences[2]+=1
-                    elif(nearbygRNAs[0]==2): 
-                        caseOccurences[3]+=1 
-                    elif(nearbygRNAs[0]==3): 
-                        caseOccurences[4]+=1
                     sizeIndel[-(tStart[i+1]-tEnd[i])]+=1
                 elif (qEnd[i]<qStart[i+1] and tEnd[i]==tStart[i+1] and (qStart[i+1]-qEnd[i])<indelRange): #insertion
                     #print "insertion"
-                    if (nearbygRNAs[0]==0): 
-                        caseOccurences[1]+=1
-                    elif(nearbygRNAs[0]==1): 
-                        caseOccurences[2]+=1
                     sizeIndel[(qStart[i+1]-qEnd[i])]+=1 
                 elif (qEnd[i]<qStart[i+1] and tEnd[i]<tStart[i+1] and (qStart[i+1]-qEnd[i])<indelRange and (tStart[i+1]-tEnd[i])<indelRange): 
-                    if (nearbygRNAs[0]==0): 
-                        caseOccurences[1]+=1
-                    elif(nearbygRNAs[0]==1): 
-                        caseOccurences[2]+=1
                     caseOccurences[1]+=1
                     sizeIndel[0]+=1
+        """
+    return caseTotal, 0, pairedEndStrandMM, pairedEndCaseMM
 
-    return misalignedQNames, unexpectedlyModifiedQNames, sizeIndel, caseOccurences
+def getCaseTotal(case1, case2, numgRNAs, pairedEndCaseMM): 
+    #print case1, case2
+    case1count4=case1.count(4)
+    case2count4=case2.count(4)
+    case=[0]*numgRNAs
+    """for i in range(0,numgRNAs):
+        if (case1[i]==4 and case2[i]!=4):
+            case[i]=case2[i]
+        elif(case1[i]!=4 and case2[i]==4):
+            case[i]=case1[i]
+        elif(case1[i]==4 and case2[i]==4): 
+            case[i]=4
+        elif(case1[i]!=4 and case2[i]!=4): 
+            pairedEndCaseMM+=1
+            if(case1count4>case2count4): 
+                case[i]=case2[i]
+            else: 
+                case[i]=case1[i]
+    """
+    for i in range(0,numgRNAs): 
+        case[i]=case1[i]
+    return case, pairedEndCaseMM
 
-def determineNearbygRNAs(tEndSite, tStartSite, gRNAChrPos, numgRNAs, spliceRange): 
-    startgRNA, stopgRNA= None,None 
+
+
+
+def updateCaseList(case, caseDict): 
+    caseString=''.join(str(e) for e in case)
+    if(caseString not in caseDict): 
+        caseDict[caseString]=1
+    else: 
+        caseDict[caseString]+=1
+    return caseDict 
+
+def determineNearbygRNAs(tEnd, tStart, gRNAChrPos, numgRNAs, spliceRange, strand): 
+    gRNAsEdits=[1]*numgRNAs
+    startgRNA, stopgRNA= 0,0 
+    numTEnd, numTStart=len(tEnd), len(tStart)
+    flankedPositions=[]
 
     for gInd in range (0, numgRNAs): 
-        if (tEndSite > gRNAChrPos[gInd][0]-spliceRange and tEndSite < gRNAChrPos[gInd][1]+spliceRange):
-            startgRNA=gInd
-        if(tStartSite > gRNAChrPos[gInd][0]-spliceRange and tStartSite < gRNAChrPos[gInd][1]+spliceRange): 
-            stopgRNA=gInd 
-    return [startgRNA, stopgRNA]
+        for i in range(0, numTStart-1): 
+            tEndSite, tStartSite=tEnd[i], tStart[i+1]
+            flanked=False
+
+            if (strand=="+"):
+                if (tEndSite > gRNAChrPos[gInd][0]-spliceRange and tEndSite < gRNAChrPos[gInd][1]+spliceRange):
+                    gRNAsEdits[gInd]=3
+                    flanked=True
+                if(tStartSite > gRNAChrPos[gInd][0]-spliceRange and tStartSite < gRNAChrPos[gInd][1]+spliceRange): 
+                    if (flanked): gRNAsEdits[gInd]=2
+                    else: gRNAsEdits[gInd]=3
+                if (gRNAChrPos[gInd][0]-spliceRange > tEndSite  and gRNAChrPos[gInd][1]+spliceRange < tStartSite): #Deleted gRNA 
+                    gRNAsEdits[gInd]=0
+            elif(strand=="-"): 
+                if(tEndSite < gRNAChrPos[numgRNAs-gInd-1][1]+spliceRange and tEndSite > gRNAChrPos[numgRNAs-gInd-1][0]-spliceRange): 
+                    gRNAsEdits[numgRNAs-gInd-1]=3
+                    flanked=True
+
+                if(tStartSite < gRNAChrPos[numgRNAs-gInd-1][1]+spliceRange and tStartSite > gRNAChrPos[numgRNAs-gInd-1][0]-spliceRange): 
+                    if (flanked): gRNAsEdits[numgRNAs-gInd-1]=2
+                    else: gRNAsEdits[numgRNAs-gInd-1]=3
+                if (gRNAChrPos[numgRNAs-gInd-1][1]+spliceRange < tEndSite  and gRNAChrPos[numgRNAs-gInd-1][0]-spliceRange > tStartSite): #Deleted gRNA 
+                    gRNAsEdits[numgRNAs-gInd-1]=0
+
+                 
+
+ 
+    for i in range(0, numgRNAs): #Determine which reads weren't covered
+        if (strand=="+"):
+            if (tEnd[numTEnd-1] > gRNAChrPos[i][0]-spliceRange and tEnd[numTEnd-1] < gRNAChrPos[i][1]+spliceRange):
+                gRNAsEdits[i]=3
+            if (tEnd[numTEnd-1] < gRNAChrPos[i][0]-spliceRange): 
+                gRNAsEdits[i]=4 
+        elif(strand=="-"): 
+            if (tEnd[numTEnd-1] < gRNAChrPos[i][0]-spliceRange and tEnd[numTEnd-1] > gRNAChrPos[i][1]+spliceRange):
+                gRNAsEdits[i]=3
+            if (tEnd[numTEnd-1] > gRNAChrPos[i][0]-spliceRange): 
+                gRNAsEdits[i]=4 
+
+
+    return gRNAsEdits
 
 def getgRNAS(gRNAfilename): 
     gRNAChrPos=[]
@@ -135,7 +199,8 @@ def getgRNAS(gRNAfilename):
             gRNAChrPos.append([line[0], line[1]])
     return gRNAChrPos
 
+if __name__ == "__main__":
+   main()
 
-main()  
 
 
